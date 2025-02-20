@@ -41,13 +41,16 @@ class="story <%= story.current_upvoted? ? "upvoted" : "" %>
         [Story removed by <%= story.is_moderated? ? "moderator" : "submitter" %>]
       <% end %>
     </span>
+    <% if story.stories_count > 0 %>
+      <span class="merge"></span><%= story.stories_count + 1 %>
+    <% end %>
     <% if story.markeddown_description.present? %>
       <a class="description_present" title="<%= truncate(story.description,
         :length => 500) %>" href="<%= story.comments_path %>">&#x2636;</a>
     <% end %>
     <% if story.can_be_seen_by_user?(@user) %>
       <span class="tags">
-        <% (story.previewing ? story.preview_tags : story.tags).each do |tag| %>
+        <% story.tags.each do |tag| %>
           <%= tag_link(tag) %>
         <% end %>
       </span>
@@ -62,7 +65,7 @@ class="story <%= story.current_upvoted? ? "upvoted" : "" %>
           <br>
           <span class="merge"></span>
           <span class="link">
-            <a href="<%= ms.url_or_comments_path %>" rel="ugc <%= ms.send_referrer? ? '' : 'noreferrer' %>"%><%= ms.title %></a>
+            <a href="<%= ms.url_or_comments_path %>" rel="ugc <%= ms.send_referrer? ? '' : 'noreferrer' %>"><%= ms.title %></a>
           </span>
           <span class="tags">
             <% ms.tags.each do |tag| %>
@@ -75,13 +78,9 @@ class="story <%= story.current_upvoted? ? "upvoted" : "" %>
             <a class="domain" href="<%= domain_path(ms.domain) %>"><%= ms.domain.domain %></a>
           <% end %>
           <span class="byline">
+            <span><%= ms.user_is_author? ? "authored by" : "via" %></span>
             <% if (@user && @user.show_avatars?) || !@user %>
               <%= link_to avatar_img(ms.user, 16), ms.user %>
-            <% end %>
-            <% if ms.user_is_author? %>
-              <span> authored by </span>
-            <% else %>
-              <span> via </span>
             <% end %>
             <%= styled_user_link ms.user, story, class: ['u-author', 'h-card'] %>
 
@@ -109,7 +108,7 @@ class="story <%= story.current_upvoted? ? "upvoted" : "" %>
 
     <div class="byline">
       <% if (@user && @user.show_avatars?) || !@user %>
-        <%= link_to avatar_img(story.user, 16), story.user %>
+        <%= link_to avatar_img(story.user, 16), user_path(story.user) %>
       <% end %>
       <% if story.previewing %>
         <% if story.user_is_author? %>

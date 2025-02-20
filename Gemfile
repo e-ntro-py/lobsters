@@ -15,6 +15,7 @@ gem "mission_control-jobs"
 # rails
 gem "scenic"
 gem "scenic-mysql_adapter"
+gem "scenic_sqlite_adapter"
 gem "activerecord-typedstore"
 gem "propshaft"
 gem "importmap-rails", "~> 2.0"
@@ -47,6 +48,7 @@ gem "stackprof"
 gem "prosopite"
 
 gem "builder" # for rss
+gem "faker" # for factory data and /cabinet
 gem "oauth" # for linking accounts
 gem "mail" # for parsing incoming mail
 gem "sitemap_generator" # for better search engine indexing
@@ -69,7 +71,6 @@ group :test, :development do
   gem "standard-performance"
   gem "standard-rails"
   gem "super_diff"
-  gem "faker"
   gem "byebug"
   gem "rb-readline"
   gem "vcr"

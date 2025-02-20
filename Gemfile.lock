@@ -202,7 +202,7 @@ GEM
       railties (>= 7.1)
       stimulus-rails
       turbo-rails
-    net-imap (0.5.5)
+    net-imap (0.5.6)
       date
       net-protocol
     net-pop (0.1.2)
@@ -212,10 +212,10 @@ GEM
     net-smtp (0.5.0)
       net-protocol
     nio4r (2.7.4)
-    nokogiri (1.18.1)
+    nokogiri (1.18.3)
       mini_portile2 (~> 2.8.2)
       racc (~> 1.4)
-    nokogiri (1.18.1-x86_64-linux-gnu)
+    nokogiri (1.18.3-x86_64-linux-gnu)
       racc (~> 1.4)
     oauth (1.1.0)
       oauth-tty (~> 1.0, >= 1.0.1)
@@ -251,7 +251,7 @@ GEM
       nio4r (~> 2.0)
     raabro (1.4.0)
     racc (1.8.1)
-    rack (3.1.8)
+    rack (3.1.10)
     rack-attack (6.7.0)
       rack (>= 1.0, < 4)
     rack-mini-profiler (3.3.1)
@@ -355,6 +355,8 @@ GEM
       railties (>= 4.0.0)
     scenic-mysql_adapter (1.1.0)
       scenic (>= 1.4.0)
+    scenic_sqlite_adapter (0.1.0)
+      activerecord (>= 4.0.0)
     securerandom (0.4.1)
     silencer (2.0.0)
     simplecov (0.22.0)
@@ -484,6 +486,7 @@ DEPENDENCIES
   rspec-rails
   scenic
   scenic-mysql_adapter
+  scenic_sqlite_adapter
   silencer
   simplecov
   sitemap_generator

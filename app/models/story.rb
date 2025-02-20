@@ -6,6 +6,7 @@ class Story < ApplicationRecord
   belongs_to :origin, optional: true, counter_cache: true
   belongs_to :merged_into_story,
     class_name: "Story",
+    counter_cache: :stories_count,
     foreign_key: "merged_story_id",
     inverse_of: :merged_stories,
     optional: true
@@ -21,11 +22,11 @@ class Story < ApplicationRecord
   has_many :suggested_tags, source: :story, through: :suggested_taggings, dependent: :destroy
   has_many :suggested_titles, dependent: :destroy
   has_many :suggested_tagging_times,
-    -> { group(:tag_id).select("count(*) as times, tag_id").order("times desc") },
+    -> { group(:tag_id).select("count(*) as times, tag_id").order(times: :desc) },
     class_name: "SuggestedTagging",
     inverse_of: :story
   has_many :suggested_title_times,
-    -> { group(:title).select("count(*) as times, title").order("times desc") },
+    -> { group(:title).select("count(*) as times, title").order(times: :desc) },
     class_name: "SuggestedTitle",
     inverse_of: :story
   has_many :comments,
@@ -68,7 +69,7 @@ class Story < ApplicationRecord
     base(user).not_hidden_by(user)
       .filter_tags(exclude_tags || [])
       .positive_ranked
-      .order("hotness")
+      .order(:hotness)
   }
   scope :recent, ->(user = nil, exclude_tags = nil) {
     base(user).not_hidden_by(user)
@@ -127,6 +128,7 @@ class Story < ApplicationRecord
   validates :is_deleted, :is_moderated, :user_is_author, :user_is_following, inclusion: {in: [true, false]}
   validates :score, :flags, :hotness, :comments_count, presence: true
   validates :normalized_url, length: {maximum: 255, allow_nil: true}
+  validates :last_edited_at, presence: true
 
   validates_each :merged_story_id do |record, _attr, value|
     if value.to_i == record.id
@@ -161,13 +163,12 @@ class Story < ApplicationRecord
 
   attr_accessor :current_vote, :editing_from_suggestions, :editor, :fetching_ip,
     :is_hidden_by_cur_user, :latest_comment_id,
-    :is_saved_by_cur_user, :moderation_reason, :previewing
+    :is_saved_by_cur_user, :moderation_reason, :previewing, :tags_was
   attr_writer :fetched_response
 
-  before_validation :assign_short_id_and_score, on: :create
+  before_validation :assign_initial_attributes, on: :create
   before_save :log_moderation
   before_save :fix_bogus_chars
-  before_create :assign_initial_hotness
   after_create :mark_submitter, :record_initial_upvote
   after_save :recreate_links, :update_cached_columns, :update_story_text
 
@@ -185,7 +186,7 @@ class Story < ApplicationRecord
       errors.add(:description, "must contain text if no URL posted")
     end
 
-    if title.starts_with?("Ask") && tags_a.include?("ask")
+    if title.starts_with?("Ask") && tags.map(&:tag).include?("ask")
       errors.add(:title, " starting 'Ask #{Rails.application.name}' or similar is redundant " \
                           "with the ask tag.")
     end
@@ -273,7 +274,7 @@ class Story < ApplicationRecord
   def check_not_pushcx_stream
     return unless url.present? && new_record? &&
       url.start_with?("https://push.cx/stream", "https://twitch.tv/pushcx")
-    errors.add(:url, "is too meta, we don't need it twice every week. Details: https://lobste.rs/c/skuxo9")
+    errors.add(:url, "is too much meta, we don't need it twice every week. Details: https://lobste.rs/c/skuxo9")
   end
 
   def comments_closing_soon?
@@ -342,7 +343,7 @@ class Story < ApplicationRecord
 
   def self.recalculate_all_hotnesses!
     # do the front page first, since find_each can't take an order
-    Story.order("id DESC").limit(100).each(&:update_cached_columns)
+    Story.order(id: :desc).limit(100).each(&:update_cached_columns)
     Story.find_each(&:update_cached_columns)
     true
   end
@@ -399,13 +400,11 @@ class Story < ApplicationRecord
     js
   end
 
-  def assign_initial_hotness
-    self.hotness = calculated_hotness
-  end
-
-  def assign_short_id_and_score
+  def assign_initial_attributes
     self.short_id = ShortId.new(self.class).generate
     self.score ||= 1 # tests are allowed to fake out the score
+    self.hotness = calculated_hotness
+    self.last_edited_at = Time.current
   end
 
   def calculated_hotness
@@ -460,16 +459,15 @@ class Story < ApplicationRecord
     true
   end
 
-  # this has to happen just before save rather than in tags_a= because we need
-  # to have a valid user_id; remember it fills .taggings, not .tags
+  # this has to happen just before save because it depends on user/editor
   def check_tags
     u = editor || user
 
     if u&.is_new? &&
-        (unpermitted = Tag.where(id: taggings.map(&:tag_id), permit_by_new_users: false)).any?
-      tags = unpermitted.map(&:tag).to_sentence
+        (unpermitted = tags.select { |t| t.permit_by_new_users == false }).any?
+      tags_str = unpermitted.map(&:tag).to_sentence
       errors.add :base, <<-EXPLANATION
-        New users can't submit stories with the tag(s) #{tags}
+        New users can't submit stories with the tag(s) #{tags_str}
         because they're for meta discussion or prone to off-topic stories.
         If a tag is appropriate for the story, leaving it off to skirt this
         restriction can earn a ban.
@@ -478,25 +476,18 @@ class Story < ApplicationRecord
       return
     end
 
-    # ignored to manage tags_a for nicer UI and because the n is typically 2-5 tags
-    Prosopite.pause
-    taggings.each do |t|
-      if !t.tag.can_be_applied_by?(u) && t.tag.privileged?
-        raise "#{u.username} does not have permission to use privileged tag #{t.tag.tag}"
-      elsif !t.tag.can_be_applied_by?(u) && !t.tag.permit_by_new_users?
-        errors.add(:base, "New users can't submit #{t.tag.tag} stories, please wait. " \
+    tags.each do |t|
+      if !t.can_be_applied_by?(u) && t.privileged?
+        raise "#{u.username} does not have permission to use privileged tag #{t.tag}"
+      elsif !t.can_be_applied_by?(u) && !t.permit_by_new_users?
+        errors.add(:base, "New users can't submit #{t.tag} stories, please wait. " \
           "If the tag is appropriate, leaving it off to skirt this restriction is a bad idea.")
         ModNote.tattle_on_story_domain!(self, "new user with protected tags")
-        raise "#{u.username} is too new to use tag #{t.tag.tag}"
-      elsif !t.tag.active? && t.new_record? && !t.marked_for_destruction?
-        # stories can have inactive tags as long as they existed before
-        raise "#{u.username} cannot add inactive tag #{t.tag.tag}"
+        raise "#{u.username} is too new to use tag #{t.tag}"
       end
     end
 
-    Prosopite.resume
-
-    if taggings.reject { |t| t.marked_for_destruction? || t.tag.is_media? }.empty?
+    if tags.reject { |t| t.is_media? }.empty?
       errors.add(:base, "Must have at least one non-media (PDF, video) " \
         "tag.  If no tags apply to your content, it probably doesn't " \
         "belong here.")
@@ -601,6 +592,8 @@ class Story < ApplicationRecord
   end
 
   def is_editable_by_user?(user)
+    return false if user.nil? || user.new_record? # assumption: cabinet view
+
     if user&.id == user_id
       if is_moderated?
         false
@@ -652,9 +645,10 @@ class Story < ApplicationRecord
       return
     end
 
-    all_changes = changes.merge(tagging_changes)
+    all_changes = changes.merge(tag_changes)
     all_changes.delete("normalized_url")
     all_changes.delete("unavailable_at")
+    all_changes.delete("last_edited_at")
 
     if !all_changes.any?
       return
@@ -732,45 +726,22 @@ class Story < ApplicationRecord
     u&.is_moderator? || !current_flagged?
   end
 
-  def tagging_changes
-    old_tags_a = taggings.reject(&:new_record?).map { |tg| tg.tag.tag }.join(" ")
-    new_tags_a = taggings.reject(&:marked_for_destruction?).map { |tg| tg.tag.tag }.join(" ")
+  def tag_changes
+    # 'tags_was' is bad grammar but is named to mirror ActiveModel::Dirty's convention of providing
+    # a 'attribute_was' reader
 
-    if old_tags_a == new_tags_a
+    raise "Controller didn't save tags_was for edit logging" if tags_was.nil?
+    old_tag_names = tags_was.map(&:tag).join(" ")
+    new_tag_names = tags.map(&:tag).join(" ")
+
+    if old_tag_names == new_tag_names
       {}
     else
-      {"tags" => [old_tags_a, new_tags_a]}
+      {"tags" => [old_tag_names, new_tag_names]}
     end
   end
 
-  def tags_a
-    @_tags_a ||= Tag
-      .where(id: taggings.reject(&:marked_for_destruction?).map { |t| t.tag_id })
-      .pluck(:tag)
-  end
-
-  def tags_a=(new_tag_names_a)
-    @_tags_a = nil
-    taggings.each do |tagging|
-      if !new_tag_names_a.include?(tagging.tag.tag)
-        tagging.mark_for_destruction
-      end
-    end
-
-    new_tags = Tag.where(tag: new_tag_names_a.uniq.compact_blank - tags.pluck(:tag))
-    new_tags.each do |t|
-      # we can't lookup whether the user is allowed to use this tag yet
-      # because we aren't assured to have a user_id by now; we'll do it in
-      # the validation with check_tags
-      taggings.build(tag_id: t.id)
-    end
-  end
-
-  def preview_tags
-    Tag.where(id: taggings.map { |t| t.tag_id })
-  end
-
-  def save_suggested_tags_a_for_user!(new_tag_names_a, user)
+  def save_suggested_tags_for_user!(new_tag_names_a, user)
     suggested_taggings.where(user_id: user.id).destroy_all
 
     new_tags = Tag
@@ -795,16 +766,16 @@ class Story < ApplicationRecord
       end
     end
 
-    if final_tags.any? && (final_tags.sort != tags_a.sort)
-      Rails.logger.info "[s#{id}] promoting suggested tags " \
-        "#{final_tags.inspect} instead of #{tags_a.inspect}"
+    if final_tags.any? && (final_tags.sort != tags.map(&:tag).sort)
+      # Rails.logger.info "[s#{id}] promoting suggested tags " \
+      #  "#{final_tags.inspect} instead of #{tags.map(&:tag).inspect}"
       self.editor = nil
       self.editing_from_suggestions = true
       self.moderation_reason = "Automatically changed from user suggestions"
-      self.tags_a = final_tags.sort
+      self.tags_was = tags.to_a
+      self.tags = Tag.where(tag: final_tags)
       if !save
-        Rails.logger.error "[s#{id}] failed auto promoting: " <<
-          errors.inspect
+        # Rails.logger.error "[s#{id}] failed auto promoting: " << errors.inspect
       end
     end
   end
@@ -827,15 +798,15 @@ class Story < ApplicationRecord
 
     title_votes.sort_by { |_k, v| v }.reverse_each do |kv|
       if kv[1] >= SUGGESTION_QUORUM
-        Rails.logger.info "[s#{id}] promoting suggested title " \
-          "#{kv[0].inspect} instead of #{self.title.inspect}"
+        # Rails.logger.info "[s#{id}] promoting suggested title " \
+        #   "#{kv[0].inspect} instead of #{self.title.inspect}"
         self.editor = nil
         self.editing_from_suggestions = true
         self.moderation_reason = "Automatically changed from user suggestions"
         self.title = kv[0]
+        self.tags_was = tags.to_a
         if !save
-          Rails.logger.error "[s#{id}] failed auto promoting: " <<
-            errors.inspect
+          # Rails.logger.error "[s#{id}] failed auto promoting: " << errors.inspect
         end
 
         break
@@ -991,7 +962,7 @@ class Story < ApplicationRecord
   end
 
   def url_is_editable_by_user?(user)
-    if new_record?
+    if new_record? # assumption: can only see it previewing a new story
       true
     elsif !is_moderated? && created_at.after?(MAX_EDIT_MINS.minutes.ago)
       true

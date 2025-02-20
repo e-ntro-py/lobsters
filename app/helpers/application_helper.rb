@@ -97,6 +97,10 @@ module ApplicationHelper
     }
   end
 
+  def page_count(record_count, entries_per_page)
+    (record_count + entries_per_page - 1) / entries_per_page
+  end
+
   def page_numbers_for_pagination(max, cur)
     if max <= MAX_PAGES
       return (1..max).to_a
@@ -143,6 +147,11 @@ module ApplicationHelper
     end
   end
 
+  # https://discuss.rubyonrails.org/t/proposal-changing-default-value-of-open-to-true-in-the-tag-method-in-actionview-taghelper/82297/2
+  def tag name = nil, options = nil, open = true, escape = true
+    super
+  end
+
   def tag_link(tag)
     link_to tag.tag, tag_path(tag), class: tag.css_class, title: tag.description
   end
@@ -150,5 +159,10 @@ module ApplicationHelper
   def how_long_ago_label(time)
     ago = how_long_ago(time)
     content_tag(:span, ago, title: time.strftime("%F %T %z"))
+  end
+
+  def how_long_ago_link(url, time)
+    ago = how_long_ago(time)
+    content_tag(:a, ago, href: url, title: time.strftime("%F %T %z"))
   end
 end

@@ -63,6 +63,7 @@ class User < ApplicationRecord
 
   typed_store :settings do |s|
     s.string :prefers_color_scheme, default: "system"
+    s.string :prefers_contrast, default: "system"
     s.boolean :email_notifications, default: false
     s.boolean :email_replies, default: false
     s.boolean :pushover_replies, default: false
@@ -85,6 +86,7 @@ class User < ApplicationRecord
   end
 
   validates :prefers_color_scheme, inclusion: %w[system light dark]
+  validates :prefers_contrast, inclusion: %w[system normal high]
 
   validates :email,
     length: {maximum: 100},
@@ -375,7 +377,7 @@ class User < ApplicationRecord
         return res
       end
     rescue => e
-      Rails.logger.error "error fetching #{gravatar_url}: #{e.message}"
+      # Rails.logger.error "error fetching #{gravatar_url}: #{e.message}"
     end
 
     nil
@@ -428,11 +430,19 @@ class User < ApplicationRecord
   # ensures some users talk to a mod before reactivating
   def good_riddance?
     return if is_banned? # https://www.youtube.com/watch?v=UcZzlPGnKdU
+
+    recent_comments_count = comments
+      .where(created_at: 30.days.ago..)
+      .where(is_deleted: true).count
+
+    recent_stories_count = stories
+      .where(created_at: 30.days.ago..)
+      .where(is_deleted: true, is_moderated: true).count
+
+    total_count = recent_comments_count + recent_stories_count
+
     self.email = "#{username}@lobsters.example" if \
-      karma < 0 ||
-        (comments.where("created_at >= now() - interval 30 day AND is_deleted").count +
-         stories.where("created_at >= now() - interval 30 day AND is_deleted AND is_moderated")
-           .count >= 3) ||
+      karma < 0 || total_count > 3 ||
         FlaggedCommenters.new("90d").check_list_for(self)
   end
 
@@ -627,10 +637,11 @@ class User < ApplicationRecord
   end
 
   def votes_for_others
-    votes.left_outer_joins(:story, :comment)
+    votes
+      .left_outer_joins(:story, :comment)
       .includes(comment: :user, story: :user)
       .where("(votes.comment_id is not null and comments.user_id <> votes.user_id) OR " \
-             "(votes.comment_id is null and stories.user_id <> votes.user_id)")
-      .order("id DESC")
+                 "(votes.comment_id is null and stories.user_id <> votes.user_id)")
+      .order(id: :desc)
   end
 end

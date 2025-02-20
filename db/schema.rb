@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2024_11_06_160424) do
+ActiveRecord::Schema[8.0].define(version: 2025_02_10_214901) do
   create_table "action_mailbox_inbound_emails", charset: "utf8mb4", collation: "utf8mb4_unicode_ci", force: :cascade do |t|
     t.integer "status", default: 0, null: false
     t.string "message_id", null: false
@@ -79,6 +79,10 @@ ActiveRecord::Schema[8.0].define(version: 2024_11_06_160424) do
     t.boolean "is_moderated", default: false, null: false
     t.boolean "is_from_email", default: false, null: false
     t.bigint "hat_id", unsigned: true
+    t.integer "depth", default: 0, null: false
+    t.integer "reply_count", default: 0, null: false
+    t.datetime "last_reply_at"
+    t.datetime "last_edited_at", null: false
     t.index ["comment"], name: "index_comments_on_comment", type: :fulltext
     t.index ["confidence"], name: "confidence_idx"
     t.index ["hat_id"], name: "comments_hat_id_fk"
@@ -299,10 +303,15 @@ ActiveRecord::Schema[8.0].define(version: 2024_11_06_160424) do
     t.bigint "domain_id"
     t.string "mastodon_id", limit: 25
     t.bigint "origin_id"
+    t.datetime "last_comment_at"
+    t.integer "stories_count", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.datetime "last_edited_at", null: false
     t.index ["created_at"], name: "index_stories_on_created_at"
     t.index ["domain_id"], name: "index_stories_on_domain_id"
     t.index ["hotness"], name: "hotness_idx"
     t.index ["id", "is_deleted"], name: "index_stories_on_id_and_is_deleted"
+    t.index ["last_comment_at"], name: "index_stories_on_last_comment_at"
     t.index ["mastodon_id"], name: "index_stories_on_mastodon_id"
     t.index ["merged_story_id"], name: "index_stories_on_merged_story_id"
     t.index ["normalized_url"], name: "index_stories_on_normalized_url"
